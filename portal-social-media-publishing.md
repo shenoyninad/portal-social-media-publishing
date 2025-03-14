@@ -1,21 +1,47 @@
-## Publishing product catalog on social media platforms from an Admin Panel
+# Publishing product catalog on social media platforms from an Admin Panel
 
-**Problem Statement**: Our e-commerce platform stores detailed product information in a database and we need to expand our sales channels by automatically publishing these products as posts on our Instagram Business page. Each post should represent a unique product, showcasing its image, name, description, and pricing details, along with a clear call-to-action directing customers to our website where they can complete their purchase.
+**Problem Statement**: An e-commerce platform stores detailed product information in a database and there is a need to expand the sales channels by automatically publishing these products as posts on an Instagram Business page. Each post should represent a unique product, showcasing its image, name, description, and pricing details, along with a clear call-to-action directing customers to a website where they can complete their purchase.
 
-#### Overview
+## Overview
 
-This document will explain in detail the design required to publish products to an Instagram Business page using a Node.js/Express backend. In this example, we assume each product has the following fields:
+This document will explain in detail the design required to publish products to an Instagram Business page using a backend service. For the sake of this exercise we will assume a UI has been built and displays all the products and gives the user the ability to publish a product using a button.
+
+In this example, we assume each product object has the following fields:
 
 - id
 - name
 - description
 - price
 - published (a Boolean flag that indicates whether the product has already been published)
-- imageUrl (since Instagram posts need an image URL)
+- imageUrl
+
+We'll need two tables to hold information about the product and it's publishing history.
+
+```
+model Product {
+  id                String           @id @default(cuid())
+  name              String
+  description       String
+  price             Float
+  published         Boolean
+  imageUrl          String
+  publishHistories  PublishHistory[]
+}
+
+model PublishHistory {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  publishedAt     DateTime @default(now())
+  instagramPostId String?
+}
+```
+
+> **Note** One-to-many relationship: one product can have multiple publish history records. instagramPostId is an optional field to store additional metadata, such as the Instagram post ID
 
 ```mermaid
 graph LR
-    A[Product in Database] --> B[Backend Node/Express]
+    A[Product in Database] --> B[Backend]
     B --> C[Instagram Graph API: Create Media]
     C --> D[Media Container Created returns creation_id]
     D --> E[Instagram Graph API: Publish Media]
@@ -24,37 +50,216 @@ graph LR
     G --> H[Product Tags Added to Post]
 ```
 
-- A: Your MongoDB stores product data.
-- B: The Express/Node.js backend queries unpublished products, calls the Instagram Graph API to create and publish posts, and then updates the product record.
-- C: The Instagram Graph API handles media creation and publishing on your Instagram Business page.
-- D: An admin interface (or automated scheduled task) triggers the publishing process.
+- Your database stores product data.
+- The backend queries unpublished products, calls the Instagram Graph API to create and publish posts, and then updates the product record.
+- The Instagram Graph API handles media creation and publishing on your Instagram Business page.
+- An admin user interface triggers the manual publishing process.
 
-#### High Level Design
+## High Level Design
 
-#### Product Model (Mongoose Schema)
+Let us build this model using the following tech stack
 
-Create a Mongoose model for the Product. If you need an image for Instagram posts, add an optional imageUrl field.
+- NodeJS/Express for the backend services
+- MongoDB to store the information about the products, Mongoose library to help with the database working
+- Assume the UI has been built using React, the UI displays all the available products, there is a button available that will allow a user to publish the product to Instagram.
+
+### Product and PublishHistory Model (Mongoose Schema)
+
+Create a Mongoose model for the Product and PublishHistory.
+
+**Product Schema**
 
 ```
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const ProductSchema = new mongoose.Schema({
+const ProductSchema = new Schema({
   name: { type: String, required: true },
-  description: String,
-  price: Number,
+  description: { type: String },
+  price: { type: Number, required: true },
   published: { type: Boolean, default: false },
-  imageUrl: String
+  imageUrl: { type: String, required: true }
 });
 
 module.exports = mongoose.model('Product', ProductSchema);
 ```
 
-#### Publishing Endpoint in Express
+**PublishHistory Schema**
 
-Create an endpoint (or scheduled job) that will:
+```
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-- Publish it to Instagram using the Graph API.
-- Update the product’s record in the database (set published: true).
+const PublishHistorySchema = new Schema({
+  productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  publishedAt: { type: Date, default: Date.now },
+  // Optional: store additional metadata such as Instagram post ID
+  instagramPostId: { type: String }
+});
+
+module.exports = mongoose.model('PublishHistory', PublishHistorySchema);
+```
+
+### Publishing Endpoints in Express
+
+We will have three endpoints, they are
+
+- Create a new product and save the details in DB
+- Return all the products to display on the UI
+- Publish a product to Instagram using the Graph API. Update the product’s record in the database (set published: true) and add publish history.
+
+Before we discuss the endpoints required, we should setup the authentication for all these APIs using JWT. This explains how to add JWT authentication middleware to secure your APIs. The idea is to create a middleware that verifies the JWT from the request header, and then apply that middleware to your routes.
+
+Create a file `middleware/auth.js` and use the following contents
+
+```
+const jwt = require('jsonwebtoken');
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Missing authorization header' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Invalid authorization header format' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ message: 'Unauthorized: Invalid token' });
+    }
+    req.user = decoded;
+    next();
+  });
+}
+
+module.exports = authMiddleware;
+```
+
+we can then use the middleware in all the APIs like this
+
+```
+app.use('/api/products', authMiddleware, (req,res) => {
+  /* Business Logic */
+});
+```
+
+#### 1. Create a new product and save the details in DB
+
+`POST /api/products`
+
+Request Body
+
+```
+{
+  "name": "Cool Sneakers",
+  "description": "A pair of stylish sneakers.",
+  "price": 79.99,
+  "imageUrl": "https://example.com/images/sneakers.jpg"
+}
+```
+
+Response Body
+
+```
+{
+  "_id": "62d0f23c3a1f3c0012345678",
+  "name": "Cool Sneakers",
+  "description": "A pair of stylish sneakers.",
+  "price": 79.99,
+  "imageUrl": "https://example.com/images/sneakers.jpg",
+  "published": false,
+  "__v": 0
+}
+```
+
+Express/Node with Mongoose code
+
+```
+const express = require('express');
+const router = express.Router();
+const Product = require('../models/product');
+
+router.post('/product', async (req, res) => {
+  try {
+    const { name, description, price, imageUrl } = req.body;
+    const product = new Product({
+      name,
+      description,
+      price,
+      imageUrl
+    });
+    const savedProduct = await product.save();
+    res.status(201).json(savedProduct);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+```
+
+#### 2.Return all the products to display on the UI
+
+`GET /api/products`
+
+Response Body
+
+```
+[
+  {
+    "_id": "62d0f23c3a1f3c0012345678",
+    "name": "Cool Sneakers",
+    "description": "A pair of stylish sneakers.",
+    "price": 79.99,
+    "imageUrl": "https://example.com/images/sneakers.jpg",
+    "published": false,
+    "__v": 0
+  },
+  {
+    "_id": "62d0f45d3a1f3c0012345679",
+    "name": "Leather Jacket",
+    "description": "A trendy leather jacket.",
+    "price": 199.99,
+    "imageUrl": "https://example.com/images/jacket.jpg",
+    "published": true,
+    "__v": 0
+  }
+]
+```
+
+Express/Node with Mongoose code
+
+```
+router.get('/products', async (req, res) => {
+  try {
+    const products = await Product.find();
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+#### 3. Publish to Instagram
+
+`POST /api/products/:id/publish`
+
+Request Param `:id`
+
+Response Body
+
+```
+{
+  "message": "Product published successfully",
+  "instagramPost": {
+    "id": "17912345678901234"
+  }
+}
+```
 
 ```
 const express = require('express');
@@ -126,6 +331,36 @@ router.post('/publish/:id', async (req, res) => {
   }
 });
 
+router.post('products/:id/publish', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const publishedMedia = await publishProductToInstagram(product);
+    const mediaId = publishedMedia.id;
+    const tagResponse = await tagProductOnMedia(mediaId, productCatalogId);
+
+    product.published = true;
+    await product.save();
+
+    const publishHistory = new PublishHistory({
+      productId: product._id,
+      instagramPostId: instagramResponse.id
+    });
+    await publishHistory.save();
+
+    res.status(200).json({
+      message: 'Product published successfully',
+      instagramPost: instagramResponse
+    });
+  } catch (error) {
+    console.error('Error publishing product:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
 ```
 
@@ -159,11 +394,11 @@ Tag Products in Your Posts:
 
 Set Up the Database:
 
-- Create a Product model in MongoDB (using Mongoose).
+- Create a Product and PublishHistory model in MongoDB (using Mongoose).
 
 Build the Backend:
 
-- Develop an Express endpoint that queries unpublished products.
+- Develop Express endpoints that performs create and read operations on products.
 - For each product, use the Instagram Graph API to create and publish a media container.
 - Update the product record after successful publishing.
 
