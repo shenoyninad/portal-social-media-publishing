@@ -424,6 +424,8 @@ Tag Products in Your Posts:
 - When creating a post (manually or via a supported API or third-party tool), tag the products from your catalog. This allows users to tap on the tags and view product details.
 - Note: While you can automate posting using the Instagram Graph API, adding product tags via API is a more advanced integration and might require using additional Facebook Marketing APIs.
 
+#### How to nvaigate to your website
+
 When using the Instagram API to tag products, you don’t directly specify a clickable URL in the tagging call. Instead, the process works through Instagram Shopping’s product catalog system. Here’s how it works:
 
 **Product Catalog Setup**: You create a product catalog in Facebook Commerce Manager. Each product in this catalog includes details like the product name, image, and—most importantly—a URL that directs users to your website’s product page.
