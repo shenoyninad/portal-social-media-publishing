@@ -106,6 +106,7 @@ We will have three endpoints, they are
 
 - Create a new product and save the details in DB
 - Return all the products to display on the UI
+- Return the details of a single product
 - Publish a product to Instagram using the Graph API. Update the product’s record in the database (set published: true) and add publish history.
 
 Before we discuss the endpoints required, we should setup the authentication for all these APIs using JWT. This explains how to add JWT authentication middleware to secure your APIs. The idea is to create a middleware that verifies the JWT from the request header, and then apply that middleware to your routes.
@@ -244,7 +245,40 @@ router.get('/products', async (req, res) => {
 });
 ```
 
-#### 3. Publish to Instagram
+#### 3. Return the details of a single product
+
+`GET /api/products/:id`
+
+Request Param `:id`
+
+Response Body
+
+```
+  {
+    "_id": "62d0f45d3a1f3c0012345679",
+    "name": "Leather Jacket",
+    "description": "A trendy leather jacket.",
+    "price": 199.99,
+    "imageUrl": "https://example.com/images/jacket.jpg",
+    "published": true,
+    "__v": 0
+  }
+```
+
+Express/Node with Mongoose code
+
+```
+router.get('/products/:id', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    res.status(200).json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+#### 4. Publish to Instagram
 
 `POST /api/products/:id/publish`
 
@@ -389,6 +423,14 @@ Tag Products in Your Posts:
 
 - When creating a post (manually or via a supported API or third-party tool), tag the products from your catalog. This allows users to tap on the tags and view product details.
 - Note: While you can automate posting using the Instagram Graph API, adding product tags via API is a more advanced integration and might require using additional Facebook Marketing APIs.
+
+When using the Instagram API to tag products, you don’t directly specify a clickable URL in the tagging call. Instead, the process works through Instagram Shopping’s product catalog system. Here’s how it works:
+
+**Product Catalog Setup**: You create a product catalog in Facebook Commerce Manager. Each product in this catalog includes details like the product name, image, and—most importantly—a URL that directs users to your website’s product page.
+
+**Tagging a Product**: When you tag a product on an Instagram post via the API, you reference the product’s ID from your product catalog. Instagram then automatically associates the catalog information (including the URL) with that tag.
+
+**User Experience**: When a user taps on the product tag, Instagram displays a product detail overlay that pulls data from your catalog. This overlay typically includes a “View on Website” or similar call-to-action, which uses the URL stored in your catalog.
 
 #### Summary of Steps
 
